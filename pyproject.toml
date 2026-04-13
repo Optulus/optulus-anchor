@@ -8,10 +8,10 @@ version = "0.1.0"
 description = "SDK skeleton with validate_tool decorator"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-dependencies = []
+dependencies = ["pydantic>=2.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["hypothesis>=6.0", "pytest>=7.0"]
 
 [tool.hatch.build]
 sources = ["src"]
