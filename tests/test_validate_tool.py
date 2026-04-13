@@ -23,5 +23,6 @@ def test_validate_tool_logs_schemas_on_call(caplog: pytest.LogCaptureFixture) ->
         assert some_function(3) == 6
 
     messages = " ".join(r.message for r in caplog.records)
+    assert "some_function" in messages
     assert "GetCustomerParams" in messages
     assert "CustomerResponse" in messages

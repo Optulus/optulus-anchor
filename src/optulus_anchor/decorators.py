@@ -17,7 +17,8 @@ def validate_tool(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             logger.info(
-                "validate_tool call: params_schema=%r response_schema=%r",
+                "validate_tool call: function=%s params_schema=%r response_schema=%r",
+                func.__name__,
                 params_schema,
                 response_schema,
             )
