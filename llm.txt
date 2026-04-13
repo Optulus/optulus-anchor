@@ -1,0 +1,6 @@
+# optulus-anchor LLM docs
+
+Canonical discoverability files:
+
+- `llms.txt` (concise quick context)
+- `llms-full.txt` (complete API reference)

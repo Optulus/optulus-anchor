@@ -1,0 +1,82 @@
+# optulus-anchor
+
+A Python SDK that validates AI agent tool calls using schemas before and after execution.
+It catches malformed parameters before tool execution and detects response drift from upstream APIs.
+
+## Install
+
+pip install optulus-anchor
+
+## Core Usage
+
+Wrap any Python tool function with `@validate_tool`.
+
+```python
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
+
+
+class SearchParams(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class SearchResponse(BaseModel):
+    results: list[str]
+    count: int
+
+
+@validate_tool(
+    params_schema=SearchParams,
+    response_schema=SearchResponse,
+)
+def search_tool(query: str, limit: int = 10) -> dict[str, object]:
+    return {"results": [query], "count": 1}
+```
+
+## Works With
+
+- Any Python callable used as an agent tool
+- Sync and async tool functions
+- Pydantic `BaseModel` schemas (including strict/forbid-extra configs)
+- Existing tool wrappers from frameworks (LangChain, OpenAI tool calling, Anthropic tool use, MCP, CrewAI) because validation wraps normal Python functions
+
+## Key Behaviors
+
+- `params_schema` validation runs **before** execution
+- `response_schema` validation runs **after** execution
+- `on_param_error="raise"` (default) stops invalid calls
+- `on_response_error="log"` (default) logs response drift without crashing by default
+- All events are emitted as structured JSON trace logs
+
+## Common Patterns
+
+### Detect API drift silently
+
+`@validate_tool(response_schema=StripeChargeResponse, on_response_error="log")`
+
+### Hard-fail on bad parameters
+
+`@validate_tool(params_schema=PaymentParams, on_param_error="raise")`
+
+### Full validation both sides
+
+`@validate_tool(params_schema=Params, response_schema=Response)`
+
+## Trace Output Format
+
+```json
+{
+  "timestamp": "...",
+  "tool": "search_tool",
+  "status": "PASS | PARAM_FAIL | RESPONSE_FAIL | EXECUTION_FAIL",
+  "latency_ms": 24,
+  "params_valid": true,
+  "response_valid": true,
+  "errors": []
+}
+```
+
+## Full Reference
+
+For complete API details, read `llms-full.txt`.
