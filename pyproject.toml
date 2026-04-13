@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "optulus-anchor"
 version = "0.1.0"
 description = "SDK skeleton with validate_tool decorator"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = ["pydantic>=2.0"]
