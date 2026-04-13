@@ -22,6 +22,54 @@ def validate_tool(
     on_param_error: ErrorPolicy = "raise",
     on_response_error: ErrorPolicy = "log",
 ) -> Callable[[F], F]:
+    """
+    Decorate a tool function with schema-based input/output validation and trace logging.
+
+    This decorator helps catch malformed tool arguments (often caused by agent
+    hallucination) and response shape drift (often caused by external API changes)
+    before those issues silently propagate through an agent workflow.
+
+    Args:
+        params_schema: Optional schema class used to validate incoming arguments.
+            Validation runs before the wrapped function executes. The bound argument
+            mapping is passed to the schema.
+        response_schema: Optional schema class used to validate the function result.
+            Validation runs after the wrapped function returns.
+        on_param_error: Policy for parameter validation failures.
+            - ``"raise"``: raise ``ToolValidationError`` and stop execution.
+            - ``"log"``: record failure and continue.
+            - ``"warn"``: record failure and continue.
+        on_response_error: Policy for response validation failures.
+            - ``"raise"``: raise ``SchemaDriftError``.
+            - ``"log"``: record failure and continue.
+            - ``"warn"``: record failure and continue.
+
+    Returns:
+        A decorator that preserves the wrapped function signature and returns a
+        wrapped callable with validation and tracing behavior.
+
+    Example:
+        ```python
+        from pydantic import BaseModel
+        from optulus_anchor import validate_tool
+
+        class SearchParams(BaseModel):
+            query: str
+            max_results: int = 5
+
+        class SearchResponse(BaseModel):
+            results: list[str]
+
+        @validate_tool(
+            params_schema=SearchParams,
+            response_schema=SearchResponse,
+            on_param_error="raise",
+            on_response_error="log",
+        )
+        def search_documents(query: str, max_results: int = 5) -> dict[str, list[str]]:
+            return {"results": [f"Result for {query}"][:max_results]}
+        ```
+    """
     if on_param_error not in {"raise", "log", "warn"}:
         raise ValueError("on_param_error must be one of: raise, log, warn")
     if on_response_error not in {"raise", "log", "warn"}:

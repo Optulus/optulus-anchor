@@ -13,7 +13,33 @@ _trace_sink: TraceSink | None = None
 
 
 def set_trace_sink(sink: TraceSink | None) -> None:
-    """Set an optional callback that receives every trace entry."""
+    """
+    Register or clear a callback that receives each emitted validation trace event.
+
+    Use this to route structured trace events into your own telemetry pipeline
+    (for example: test assertions, analytics ingestion, or custom observability).
+
+    Args:
+        sink: Callable that accepts one trace entry dictionary, or ``None`` to
+            disable callback delivery.
+
+    Returns:
+        ``None``. This function updates process-global tracing configuration.
+
+    Example:
+        ```python
+        from optulus_anchor import set_trace_sink
+
+        events: list[dict[str, object]] = []
+
+        def capture(event: dict[str, object]) -> None:
+            events.append(event)
+
+        set_trace_sink(capture)
+        # ... run validated tools ...
+        set_trace_sink(None)  # cleanup
+        ```
+    """
     global _trace_sink
     _trace_sink = sink
 
@@ -27,6 +53,37 @@ def log_trace(
     params_valid: bool | None = None,
     response_valid: bool | None = None,
 ) -> None:
+    """
+    Emit a structured trace event for tool validation and execution lifecycle.
+
+    The event is logged via the package logger as JSON and optionally forwarded
+    to the sink configured with ``set_trace_sink``.
+
+    Args:
+        tool_name: Logical tool/function name associated with the event.
+        status: Lifecycle status token such as ``"PASS"``, ``"PARAM_FAIL"``,
+            ``"RESPONSE_FAIL"``, or ``"EXECUTION_FAIL"``.
+        errors: Optional list of human-readable validation or runtime errors.
+        latency_ms: Optional execution latency in milliseconds.
+        params_valid: Optional input validation result.
+        response_valid: Optional output validation result.
+
+    Returns:
+        ``None``. Side effects are log emission and optional sink callback.
+
+    Example:
+        ```python
+        from optulus_anchor.logger import log_trace
+
+        log_trace(
+            tool_name="search_documents",
+            status="PASS",
+            latency_ms=42,
+            params_valid=True,
+            response_valid=True,
+        )
+        ```
+    """
     entry = {
         "timestamp": datetime.now(UTC).isoformat(),
         "tool": tool_name,

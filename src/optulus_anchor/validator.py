@@ -33,6 +33,28 @@ def _validate_with_schema(payload: Any, schema: type[Any]) -> None:
 
 
 def validate_params(params: dict[str, Any], schema: type[Any]) -> ValidationResult:
+    """
+    Validate a tool's input parameter payload against a schema.
+
+    Args:
+        params: Bound tool arguments represented as a dictionary.
+        schema: Schema class used to validate the input payload.
+
+    Returns:
+        ``ValidationResult`` with ``valid=True`` when validation succeeds;
+        otherwise ``valid=False`` plus normalized error messages.
+
+    Example:
+        ```python
+        from pydantic import BaseModel
+
+        class SearchParams(BaseModel):
+            query: str
+
+        result = validate_params({"query": "docs"}, SearchParams)
+        assert result.valid is True
+        ```
+    """
     try:
         _validate_with_schema(params, schema)
         return ValidationResult(valid=True, errors=[])
@@ -41,6 +63,28 @@ def validate_params(params: dict[str, Any], schema: type[Any]) -> ValidationResu
 
 
 def validate_response(response: Any, schema: type[Any]) -> ValidationResult:
+    """
+    Validate a tool's returned value against a response schema.
+
+    Args:
+        response: Value returned by a tool function.
+        schema: Schema class used to validate the response payload.
+
+    Returns:
+        ``ValidationResult`` with ``valid=True`` when validation succeeds;
+        otherwise ``valid=False`` plus normalized error messages.
+
+    Example:
+        ```python
+        from pydantic import BaseModel
+
+        class SearchResponse(BaseModel):
+            results: list[str]
+
+        result = validate_response({"results": ["a", "b"]}, SearchResponse)
+        assert result.valid is True
+        ```
+    """
     try:
         _validate_with_schema(response, schema)
         return ValidationResult(valid=True, errors=[])
