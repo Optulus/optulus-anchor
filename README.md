@@ -1,7 +1,6 @@
 # optulus-anchor
 
-`optulus-anchor` is a Python SDK for validating AI tool calls at runtime.
-It wraps tool functions with schema checks for both incoming parameters and outgoing responses, then emits structured JSON traces for observability.
+> Python decorator that validates AI agent tool calls against Pydantic schemas and detects external API drift.
 
 ## Install
 
@@ -9,25 +8,22 @@ It wraps tool functions with schema checks for both incoming parameters and outg
 pip install optulus-anchor
 ```
 
-## Why use it
-
-- Catch bad tool arguments before execution.
-- Detect response shape drift after execution.
-- Control failures with per-stage error policies (`raise`, `log`, `warn`).
-- Capture trace events for logs, tests, and telemetry pipelines.
-- Works with normal and async Python callables.
-
-## Quickstart
+## 30-Second Example
 
 ```python
+import logging
+
 from pydantic import BaseModel
 
 from optulus_anchor import validate_tool
 
 
+logging.basicConfig(level=logging.INFO)
+
+
 class SearchParams(BaseModel):
     query: str
-    limit: int = 10
+    limit: int = 3
 
 
 class SearchResponse(BaseModel):
@@ -38,38 +34,198 @@ class SearchResponse(BaseModel):
 @validate_tool(
     params_schema=SearchParams,
     response_schema=SearchResponse,
-    on_param_error="raise",   # default
-    on_response_error="log",  # default
+    on_param_error="raise",
+    on_response_error="log",
 )
-def search_docs(query: str, limit: int = 10) -> dict[str, object]:
-    return {"results": [f"Result for {query}"], "count": 1}
+def search_docs(query: str, limit: int = 3) -> dict[str, object]:
+    all_hits = [f"{query}-a", f"{query}-b", f"{query}-c", f"{query}-d"]
+    selected = all_hits[:limit]
+    return {"results": selected, "count": len(selected)}
+
+
+if __name__ == "__main__":
+    print(search_docs(query="anchor sdk", limit=2))
 ```
 
-## Validation flow
+## Works With
 
-1. **Before execution**: incoming arguments are bound to the function signature and validated against `params_schema`.
-2. **Function execution**: the wrapped callable runs (sync or async).
-3. **After execution**: returned value is validated against `response_schema`.
-4. **Trace emission**: JSON trace event is emitted for pass/fail status.
+This library wraps regular Python functions, so it can sit behind common tool ecosystems.
 
-## Error policies
+### LangChain (`@tool`)
 
-- `on_param_error="raise"`: raises `ToolValidationError` and stops execution.
-- `on_param_error="log"` / `"warn"`: logs the validation failure and continues.
-- `on_response_error="raise"`: raises `SchemaDriftError`.
-- `on_response_error="log"` / `"warn"`: logs response drift and returns the tool result.
+```python
+from langchain_core.tools import tool
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
 
-## Tracing
 
-By default, traces are emitted to logger `optulus_anchor.tool_validator` as JSON.
+class WeatherParams(BaseModel):
+    city: str
 
-Example trace shape:
+
+class WeatherResponse(BaseModel):
+    forecast: str
+
+
+@tool
+@validate_tool(params_schema=WeatherParams, response_schema=WeatherResponse)
+def weather_tool(city: str) -> dict[str, str]:
+    return {"forecast": f"Sunny in {city}"}
+```
+
+### OpenAI tool calling
+
+```python
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
+
+
+class LookupParams(BaseModel):
+    account_id: str
+
+
+class LookupResponse(BaseModel):
+    status: str
+
+
+@validate_tool(params_schema=LookupParams, response_schema=LookupResponse)
+def lookup_account(account_id: str) -> dict[str, str]:
+    return {"status": f"active:{account_id}"}
+```
+
+### Anthropic tool use
+
+```python
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
+
+
+class SearchParams(BaseModel):
+    query: str
+
+
+class SearchResponse(BaseModel):
+    answer: str
+
+
+@validate_tool(params_schema=SearchParams, response_schema=SearchResponse)
+def claude_search(query: str) -> dict[str, str]:
+    return {"answer": f"Result for {query}"}
+```
+
+### MCP tools
+
+```python
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
+
+
+class TicketParams(BaseModel):
+    ticket_id: str
+
+
+class TicketResponse(BaseModel):
+    title: str
+
+
+@validate_tool(params_schema=TicketParams, response_schema=TicketResponse)
+def get_ticket(ticket_id: str) -> dict[str, str]:
+    return {"title": f"Ticket {ticket_id}"}
+```
+
+### CrewAI tools
+
+```python
+from pydantic import BaseModel
+from optulus_anchor import validate_tool
+
+
+class CalcParams(BaseModel):
+    a: int
+    b: int
+
+
+class CalcResponse(BaseModel):
+    result: int
+
+
+@validate_tool(params_schema=CalcParams, response_schema=CalcResponse)
+def add_tool(a: int, b: int) -> dict[str, int]:
+    return {"result": a + b}
+```
+
+## Why This Exists
+
+Agent tool calls fail in two high-cost ways: the model sends malformed arguments (hallucinated fields, wrong types, missing required keys), or the downstream API changes response shape over time. Both failures are common in production and can silently degrade agent behavior if they are not caught at the tool boundary.
+
+`optulus-anchor` adds a lightweight validation boundary around each tool function. It validates inputs before execution, validates outputs after execution, and emits structured trace events so teams can alert, debug, and quantify drift without rewriting their tool stack.
+
+## Full API Reference
+
+### `validate_tool`
+
+```python
+validate_tool(
+    *,
+    params_schema: type[Any] | None = None,
+    response_schema: type[Any] | None = None,
+    on_param_error: Literal["raise", "log", "warn"] = "raise",
+    on_response_error: Literal["raise", "log", "warn"] = "log",
+) -> Callable[[F], F]
+```
+
+Parameters:
+
+- `params_schema`: schema class used to validate incoming bound arguments before execution.
+- `response_schema`: schema class used to validate returned value after execution.
+- `on_param_error`: behavior when parameter validation fails.
+  - `"raise"`: raise `ToolValidationError` and stop execution.
+  - `"log"`: emit `PARAM_FAIL` trace and continue.
+  - `"warn"`: emit `PARAM_FAIL` trace and continue.
+- `on_response_error`: behavior when response validation fails.
+  - `"raise"`: raise `SchemaDriftError`.
+  - `"log"`: emit `RESPONSE_FAIL` trace and return result.
+  - `"warn"`: emit `RESPONSE_FAIL` trace and return result.
+
+Behavior summary:
+
+- Works for sync and async functions.
+- Emits `EXECUTION_FAIL` trace on runtime exceptions, then re-raises.
+- Emits `PASS` trace with latency on successful validation path.
+
+### `set_trace_sink`
+
+```python
+set_trace_sink(sink: Callable[[dict[str, Any]], None] | None) -> None
+```
+
+Parameters:
+
+- `sink`: callback that receives each trace event dictionary.
+- pass `None` to clear callback delivery.
+
+Default logging behavior:
+
+- logger name: `optulus_anchor.tool_validator`
+- `PASS` logs at INFO
+- `PARAM_FAIL`, `RESPONSE_FAIL`, and `EXECUTION_FAIL` log at WARNING
+
+### `ToolValidationError`
+
+- Raised by `validate_tool(..., on_param_error="raise")` when parameter validation fails.
+
+### `SchemaDriftError`
+
+- Subclass of `ToolValidationError`.
+- Raised by `validate_tool(..., on_response_error="raise")` when response validation fails.
+
+### Trace event shape
 
 ```json
 {
-  "timestamp": "2026-04-13T00:00:00+00:00",
-  "tool": "search_docs",
-  "status": "PASS",
+  "timestamp": "ISO-8601 UTC string",
+  "tool": "tool_function_name",
+  "status": "PASS | PARAM_FAIL | RESPONSE_FAIL | EXECUTION_FAIL",
   "latency_ms": 12,
   "params_valid": true,
   "response_valid": true,
@@ -77,27 +233,7 @@ Example trace shape:
 }
 ```
 
-Possible `status` values:
+## LLM Discoverability Files
 
-- `PASS`
-- `PARAM_FAIL`
-- `RESPONSE_FAIL`
-- `EXECUTION_FAIL`
-
-You can also register a custom trace callback:
-
-```python
-from optulus_anchor import set_trace_sink
-
-events: list[dict[str, object]] = []
-set_trace_sink(events.append)
-```
-
-## Public API
-
-- `validate_tool(...)`
-- `set_trace_sink(...)`
-- `ToolValidationError`
-- `SchemaDriftError`
-
-For LLM-focused discoverability docs, see `llms.txt` and `llms-full.txt`.
+- `llms.txt` (short context for coding agents)
+- `llms-full.txt` (complete machine-readable SDK reference)
