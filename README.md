@@ -95,7 +95,7 @@ LangChain, OpenAI tool calling, Anthropic tool use, MCP servers, CrewAI, or cust
 {
   "tool": "search_docs",
   "status": "PARAM_FAIL",
-  "errors": [{"field": "limit", "msg": "Input should be int"}]
+  "errors": ["limit: Input should be int"]
 }
 ```
 
