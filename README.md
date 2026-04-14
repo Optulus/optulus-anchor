@@ -1,6 +1,10 @@
 # optulus-anchor
 
-> Python decorator that validates AI agent tool calls against Pydantic schemas and detects external API drift.
+Python runtime guardrails for AI tool functions:
+
+- validate tool inputs against a schema before execution
+- validate tool outputs against a schema after execution
+- emit structured trace events for observability and drift detection
 
 ## Install
 
@@ -8,32 +12,11 @@
 pip install optulus-anchor
 ```
 
-## CLI
-
-`optulus-anchor` includes an `anchor` command with a `report` subcommand for trace health:
-
-```bash
-anchor report
-```
-
-By default, it reads from `.trace/traces.sqlite` in your current working directory.
-If you set `OPTULUS_ANCHOR_TRACE_DIR`, it reads from
-`$OPTULUS_ANCHOR_TRACE_DIR/.trace/traces.sqlite` instead.
-
-The report summarizes each tool's call volume/failures for the last 24 hours and
-highlights response-schema drift signals detected in trace validation errors.
-
 ## 30-Second Example
 
 ```python
-import logging
-
 from pydantic import BaseModel
-
 from optulus_anchor import validate_tool
-
-
-logging.basicConfig(level=logging.INFO)
 
 
 class SearchParams(BaseModel):
@@ -53,129 +36,23 @@ class SearchResponse(BaseModel):
     on_response_error="log",
 )
 def search_docs(query: str, limit: int = 3) -> dict[str, object]:
-    all_hits = [f"{query}-a", f"{query}-b", f"{query}-c", f"{query}-d"]
-    selected = all_hits[:limit]
+    selected = [f"{query}-a", f"{query}-b", f"{query}-c"][:limit]
     return {"results": selected, "count": len(selected)}
-
-
-if __name__ == "__main__":
-    print(search_docs(query="anchor sdk", limit=2))
 ```
 
-## Works With
-
-This library wraps regular Python functions, so it can sit behind common tool ecosystems.
-
-### LangChain (`@tool`)
+## Public API
 
 ```python
-from langchain_core.tools import tool
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class WeatherParams(BaseModel):
-    city: str
-
-
-class WeatherResponse(BaseModel):
-    forecast: str
-
-
-@tool
-@validate_tool(params_schema=WeatherParams, response_schema=WeatherResponse)
-def weather_tool(city: str) -> dict[str, str]:
-    return {"forecast": f"Sunny in {city}"}
+from optulus_anchor import (
+    SchemaDriftError,
+    ToolCorrectionNeeded,
+    ToolValidationError,
+    disable_persistent_tracelog,
+    enable_persistent_tracelog,
+    set_trace_sink,
+    validate_tool,
+)
 ```
-
-### OpenAI tool calling
-
-```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class LookupParams(BaseModel):
-    account_id: str
-
-
-class LookupResponse(BaseModel):
-    status: str
-
-
-@validate_tool(params_schema=LookupParams, response_schema=LookupResponse)
-def lookup_account(account_id: str) -> dict[str, str]:
-    return {"status": f"active:{account_id}"}
-```
-
-### Anthropic tool use
-
-```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class SearchParams(BaseModel):
-    query: str
-
-
-class SearchResponse(BaseModel):
-    answer: str
-
-
-@validate_tool(params_schema=SearchParams, response_schema=SearchResponse)
-def claude_search(query: str) -> dict[str, str]:
-    return {"answer": f"Result for {query}"}
-```
-
-### MCP tools
-
-```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class TicketParams(BaseModel):
-    ticket_id: str
-
-
-class TicketResponse(BaseModel):
-    title: str
-
-
-@validate_tool(params_schema=TicketParams, response_schema=TicketResponse)
-def get_ticket(ticket_id: str) -> dict[str, str]:
-    return {"title": f"Ticket {ticket_id}"}
-```
-
-### CrewAI tools
-
-```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class CalcParams(BaseModel):
-    a: int
-    b: int
-
-
-class CalcResponse(BaseModel):
-    result: int
-
-
-@validate_tool(params_schema=CalcParams, response_schema=CalcResponse)
-def add_tool(a: int, b: int) -> dict[str, int]:
-    return {"result": a + b}
-```
-
-## Why This Exists
-
-Agent tool calls fail in two high-cost ways: the model sends malformed arguments (hallucinated fields, wrong types, missing required keys), or the downstream API changes response shape over time. Both failures are common in production and can silently degrade agent behavior if they are not caught at the tool boundary.
-
-`optulus-anchor` adds a lightweight validation boundary around each tool function. It validates inputs before execution, validates outputs after execution, and emits structured trace events so teams can alert, debug, and quantify drift without rewriting their tool stack.
-
-## Full API Reference
 
 ### `validate_tool`
 
@@ -184,29 +61,58 @@ validate_tool(
     *,
     params_schema: type[Any] | None = None,
     response_schema: type[Any] | None = None,
-    on_param_error: Literal["raise", "log", "warn"] = "raise",
+    on_param_error: Literal["raise", "log", "warn", "self_correct"] = "raise",
     on_response_error: Literal["raise", "log", "warn"] = "log",
+    max_correction_attempts: int = 2,
 ) -> Callable[[F], F]
 ```
 
-Parameters:
+#### Parameter validation (`params_schema`)
 
-- `params_schema`: schema class used to validate incoming bound arguments before execution.
-- `response_schema`: schema class used to validate returned value after execution.
-- `on_param_error`: behavior when parameter validation fails.
-  - `"raise"`: raise `ToolValidationError` and stop execution.
-  - `"log"`: emit `PARAM_FAIL` trace and continue.
-  - `"warn"`: emit `PARAM_FAIL` trace and continue.
-- `on_response_error`: behavior when response validation fails.
-  - `"raise"`: raise `SchemaDriftError`.
-  - `"log"`: emit `RESPONSE_FAIL` trace and return result.
-  - `"warn"`: emit `RESPONSE_FAIL` trace and return result.
+- argument binding uses the wrapped function signature
+- defaults are applied
+- `self` / `cls` are excluded from validation payloads
 
-Behavior summary:
+`on_param_error` behavior:
 
-- Works for sync and async functions.
-- Emits `EXECUTION_FAIL` trace on runtime exceptions, then re-raises.
-- Emits `PASS` trace with latency on successful validation path.
+- `"raise"`: emit `PARAM_FAIL`, raise `ToolValidationError`, do not execute the tool
+- `"log"` / `"warn"`: emit `PARAM_FAIL`, continue execution
+- `"self_correct"`: emit `PARAM_FAIL`, raise `ToolCorrectionNeeded` with:
+  - tool name, attempt index, max attempts
+  - attempted params
+  - normalized validation errors
+  - a generated correction prompt for LLM retry loops
+  - correction history
+
+#### Response validation (`response_schema`)
+
+`on_response_error` behavior:
+
+- `"raise"`: emit `RESPONSE_FAIL`, raise `SchemaDriftError`
+- `"log"` / `"warn"`: emit `RESPONSE_FAIL`, return original tool output
+
+#### Execution behavior
+
+- works with sync and async functions
+- on runtime exceptions: emits `EXECUTION_FAIL`, then re-raises
+- always emits a `PASS` trace after successful function execution unless an exception is raised
+  earlier; with non-raising response policy this means both `RESPONSE_FAIL` and `PASS` can be
+  emitted for the same call
+
+### `ToolValidationError`
+
+- strict parameter validation failure (`on_param_error="raise"`)
+
+### `SchemaDriftError`
+
+- subclass of `ToolValidationError`
+- strict response validation failure (`on_response_error="raise"`)
+
+### `ToolCorrectionNeeded`
+
+- subclass of `ToolValidationError`
+- raised when `on_param_error="self_correct"`
+- call `.to_dict()` to get a JSON-serializable payload for orchestrator retries
 
 ### `set_trace_sink`
 
@@ -214,41 +120,58 @@ Behavior summary:
 set_trace_sink(sink: Callable[[dict[str, Any]], None] | None) -> None
 ```
 
-Parameters:
+Yes, trace sink callback delivery is supported.
 
-- `sink`: callback that receives each trace event dictionary.
-- pass `None` to clear callback delivery.
+- pass a callable to receive every emitted trace event
+- pass `None` to clear callback delivery
+- callback is process-global
 
-Default logging behavior:
+### Persistent tracelog controls
 
-- logger name: `optulus_anchor.tool_validator`
-- `PASS` logs at INFO
-- `PARAM_FAIL`, `RESPONSE_FAIL`, and `EXECUTION_FAIL` log at WARNING
+`optulus-anchor` persists traces to SQLite by default.
 
-### `ToolValidationError`
+- default path: `.trace/traces.sqlite` in current working directory
+- override root with `OPTULUS_ANCHOR_TRACE_DIR`
+- disable with env var `OPTULUS_ANCHOR_NO_TRACE=1` (or `true/yes/on`)
+- disable/enable in-process with:
+  - `disable_persistent_tracelog()`
+  - `enable_persistent_tracelog()`
 
-- Raised by `validate_tool(..., on_param_error="raise")` when parameter validation fails.
-
-### `SchemaDriftError`
-
-- Subclass of `ToolValidationError`.
-- Raised by `validate_tool(..., on_response_error="raise")` when response validation fails.
-
-### Trace event shape
+## Trace event shape
 
 ```json
 {
   "timestamp": "ISO-8601 UTC string",
   "tool": "tool_function_name",
   "status": "PASS | PARAM_FAIL | RESPONSE_FAIL | EXECUTION_FAIL",
-  "latency_ms": 12,
+  "latency_ms": 12.345,
   "params_valid": true,
   "response_valid": true,
   "errors": []
 }
 ```
 
+## CLI
+
+The package installs `anchor`:
+
+```bash
+anchor report --hours 24
+```
+
+`anchor report` reads the SQLite trace DB and prints:
+
+- tool-level calls and failures in a lookback window
+- drift hints inferred from `RESPONSE_FAIL` errors (for example missing fields)
+- most unreliable tool by failure rate
+
+## Works With
+
+This SDK wraps regular Python callables, so it can sit under most tool ecosystems:
+LangChain, OpenAI tool calling, Anthropic tool use, MCP servers, CrewAI, or custom runtimes.
+
 ## LLM Discoverability Files
 
+- `llm.txt` (quick pointer doc)
 - `llms.txt` (short context for coding agents)
-- `llms-full.txt` (complete machine-readable SDK reference)
+- `llms-full.txt` (full machine-readable SDK reference)

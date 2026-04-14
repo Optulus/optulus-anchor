@@ -1,27 +1,23 @@
 # optulus-anchor — Full API Reference for LLMs
 
-`optulus-anchor` is a runtime validation SDK for AI tool functions.
-It validates tool parameters pre-execution, validates tool responses post-execution, and emits JSON trace events for observability.
+`optulus-anchor` is a runtime validation SDK for Python tool functions used in AI agents.
+
+- validates inputs before tool execution
+- validates outputs after tool execution
+- emits structured traces for telemetry and drift analysis
+- supports strict or non-strict failure policies
 
 Package name: `optulus-anchor`  
 Import path: `optulus_anchor`
 
 ## Install
 
-pip install optulus-anchor
+`pip install optulus-anchor`
 
-## Python version and dependency
+## Requirements
 
 - Python `>=3.10`
-- Dependency: `pydantic>=2.0`
-
-## Main Concepts
-
-- Tool functions are decorated with `validate_tool(...)`.
-- Parameters are normalized from positional/keyword args to a name-value mapping.
-- Validation uses Pydantic-compatible schema classes.
-- Failures can either raise exceptions or only log warnings based on policy.
-- Each call emits a structured trace with status and optional errors/latency.
+- `pydantic>=2.0`
 
 ## Public Exports
 
@@ -29,177 +25,201 @@ From `optulus_anchor`:
 
 - `validate_tool`
 - `set_trace_sink`
+- `enable_persistent_tracelog`
+- `disable_persistent_tracelog`
 - `ToolValidationError`
 - `SchemaDriftError`
+- `ToolCorrectionNeeded`
 
 ## Decorator API
 
 ### `validate_tool(...)`
-
-Signature:
 
 ```python
 validate_tool(
     *,
     params_schema: type[Any] | None = None,
     response_schema: type[Any] | None = None,
-    on_param_error: Literal["raise", "log", "warn"] = "raise",
+    on_param_error: Literal["raise", "log", "warn", "self_correct"] = "raise",
     on_response_error: Literal["raise", "log", "warn"] = "log",
+    max_correction_attempts: int = 2,
 ) -> Callable[[F], F]
 ```
 
-Behavior:
+#### Parameter validation lifecycle
 
-- If `params_schema` is provided, validates bound arguments before calling the function.
-- If `response_schema` is provided, validates return value after function execution.
-- Supports sync and async functions.
-- Preserves wrapped function metadata using `functools.wraps`.
-- Emits trace events for pass/fail states.
+When `params_schema` is provided:
 
-Validation policies:
+1. Call args are bound with `inspect.signature(...).bind_partial(...)`
+2. Defaults are applied
+3. `self` / `cls` are removed from payload
+4. Payload is validated against the schema
 
-- `on_param_error="raise"`:
-  - emits `PARAM_FAIL` trace
+`on_param_error` policies:
+
+- `"raise"`:
+  - emits `PARAM_FAIL`
   - raises `ToolValidationError`
-  - wrapped tool does not execute
-- `on_param_error="log"` or `"warn"`:
-  - emits `PARAM_FAIL` trace
-  - continues execution
-- `on_response_error="raise"`:
-  - emits `RESPONSE_FAIL` trace
+  - wrapped function does not execute
+- `"log"` or `"warn"`:
+  - emits `PARAM_FAIL`
+  - wrapped function continues
+- `"self_correct"`:
+  - emits `PARAM_FAIL`
+  - raises `ToolCorrectionNeeded` including:
+    - `tool_name`
+    - `attempt`
+    - `max_attempts`
+    - `attempted_params`
+    - `errors`
+    - `correction_prompt`
+    - `correction_history`
+
+Notes:
+
+- hidden kwargs are supported for orchestrator loops:
+  - `__tool_correction_attempt`
+  - `__tool_correction_history`
+- `max_correction_attempts` must be `>= 1`
+- retries are not performed by the SDK; retry orchestration happens upstream
+
+#### Response validation lifecycle
+
+When `response_schema` is provided, return values are validated post-execution.
+
+`on_response_error` policies:
+
+- `"raise"`:
+  - emits `RESPONSE_FAIL`
   - raises `SchemaDriftError`
-- `on_response_error="log"` or `"warn"`:
-  - emits `RESPONSE_FAIL` trace
-  - returns original tool output
+- `"log"` or `"warn"`:
+  - emits `RESPONSE_FAIL`
+  - returns original output
 
-Execution failure handling:
+#### Execution and tracing behavior
 
-- If wrapped tool raises an exception, emits `EXECUTION_FAIL` trace with error message, then re-raises.
-
-Successful flow:
-
-- Emits `PASS` trace with `latency_ms`.
-- Includes `params_valid` and `response_valid` only when corresponding schemas are configured.
+- supports sync and async wrapped functions
+- runtime exceptions emit `EXECUTION_FAIL`, then are re-raised
+- after successful function execution, a `PASS` trace is emitted with latency
+- with non-raising response policy, a single call can emit both `RESPONSE_FAIL` and `PASS`
 
 ## Exceptions
 
 ### `ToolValidationError`
 
-- Raised when parameter validation fails under strict policy (`on_param_error="raise"`).
+Base validation exception.
 
 ### `SchemaDriftError`
 
-- Subclass of `ToolValidationError`.
-- Raised when response validation fails under strict policy (`on_response_error="raise"`).
+Subclass of `ToolValidationError`; strict response validation failure.
+
+### `ToolCorrectionNeeded`
+
+Subclass of `ToolValidationError`; emitted for `on_param_error="self_correct"` to drive external correction loops.
+
+Methods:
+
+- `.to_dict() -> dict[str, Any]` returns stable JSON-serializable payload
 
 ## Trace API
 
 ### `set_trace_sink(sink)`
 
-Signature:
-
 ```python
 set_trace_sink(sink: Callable[[dict[str, Any]], None] | None) -> None
 ```
 
-Behavior:
+Yes, trace sink callback delivery is part of the SDK.
 
-- Registers a process-global callback receiving each trace event dict.
-- Pass `None` to clear the callback.
+- registers a process-global callback for each emitted trace event
+- pass `None` to clear callback delivery
 
-Default logging:
-
-- Logger name: `optulus_anchor.tool_validator`
-- `PASS` is logged at INFO.
-- Non-pass statuses are logged at WARNING.
-
-Trace entry fields:
+### Trace event schema
 
 ```json
 {
   "timestamp": "ISO-8601 UTC string",
   "tool": "function_name",
   "status": "PASS | PARAM_FAIL | RESPONSE_FAIL | EXECUTION_FAIL",
-  "latency_ms": 0,
+  "latency_ms": 0.0,
   "params_valid": true,
   "response_valid": true,
   "errors": []
 }
 ```
 
-## Schema Compatibility Notes
+Logging defaults:
 
-Validation helper behavior:
+- logger name: `optulus_anchor.tool_validator`
+- `PASS` logs at INFO
+- non-pass statuses log at WARNING
 
-- If schema has `.model_validate`, it is called with payload (Pydantic v2 path).
-- Otherwise:
-  - if payload is a dict, schema is called with `schema(**payload)`
-  - else schema is called with `schema(payload)`
+## Persistent Tracelog
+
+Traces are persisted to SQLite unless disabled.
+
+Default path:
+
+- `<cwd>/.trace/traces.sqlite`
+
+Environment controls:
+
+- `OPTULUS_ANCHOR_TRACE_DIR`: alternate root directory for `.trace/traces.sqlite`
+- `OPTULUS_ANCHOR_NO_TRACE=1|true|yes|on`: disable SQLite persistence
+
+Runtime controls:
+
+- `disable_persistent_tracelog()`
+- `enable_persistent_tracelog()`
+
+SQLite table:
+
+- `trace_events(timestamp, tool_name, status, latency_ms, params_valid, response_valid, errors_json)`
+
+## CLI
+
+Script entrypoint: `anchor`
+
+Command:
+
+```bash
+anchor report --hours 24
+```
+
+Behavior:
+
+- reads trace DB from configured path
+- aggregates tool calls and failures in lookback window
+- detects likely schema drift hints from `RESPONSE_FAIL` missing-field errors
+- prints most unreliable tool by failure rate
+
+## Validation Internals
+
+Schema invocation strategy:
+
+- if schema exposes `.model_validate`, call it directly (Pydantic v2 path)
+- otherwise:
+  - if payload is dict: `schema(**payload)`
+  - else: `schema(payload)`
 
 Error normalization:
 
-- Pydantic validation errors are normalized to strings like:
-  - `field_name: message`
-  - `nested.path: message`
+- Pydantic errors are transformed to `location: message` strings
+- nested locations are dot-joined (example: `meta.tags: Field required`)
 
-## Argument Binding Notes
+## Verified by Tests
 
-Before parameter validation:
+- positional + keyword arg handling
+- async wrappers
+- nested object/list validation
+- nullable vs non-nullable correctness
+- strict extra-field enforcement when schema forbids extras
+- fuzz/property coverage for valid and invalid nested payloads
+- trace persistence behavior and disable toggles
+- CLI report aggregation and drift hint extraction
 
-- Call arguments are bound using target function signature (`inspect.signature(...).bind_partial`).
-- Defaults are applied.
-- Conventional receiver parameters `self` and `cls` are removed from validation payload.
+## Related Docs
 
-## Integration Patterns
-
-Use this SDK around any Python function that serves as a tool entrypoint.  
-That includes tools exposed via wrappers/frameworks (for example LangChain, OpenAI tools, Anthropic tool use, MCP tool servers, CrewAI), because those patterns ultimately call Python functions.
-
-## Minimal Examples
-
-### Full validation (params + response)
-
-```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-class Params(BaseModel):
-    query: str
-
-class Response(BaseModel):
-    ok: bool
-
-@validate_tool(params_schema=Params, response_schema=Response)
-def tool(query: str) -> dict[str, bool]:
-    return {"ok": True}
-```
-
-### Log parameter failures and continue
-
-```python
-@validate_tool(params_schema=Params, on_param_error="log")
-def tool(query: str, **kwargs: object) -> dict[str, bool]:
-    return {"ok": True}
-```
-
-### Raise on response drift
-
-```python
-@validate_tool(response_schema=Response, on_response_error="raise")
-def tool(query: str) -> dict[str, object]:
-    return {"unexpected": "shape"}
-```
-
-## Verified Behaviors from Test Suite
-
-- Accepts positional and keyword arguments.
-- Handles async functions.
-- Validates nested objects and lists.
-- Supports nullable and non-nullable fields correctly.
-- Honors strict schema settings (for example extra fields forbidden).
-- Fuzz tests cover both valid and invalid nested payloads.
-
-## Related Files
-
-- Human docs: `README.md`
-- LLM quick context: `llms.txt`
+- `README.md` (human overview)
+- `llm.txt` (quick pointer file)
+- `llms.txt` (compact machine context)

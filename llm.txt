@@ -1,6 +1,33 @@
-# optulus-anchor LLM docs
+# optulus-anchor LLM quick doc
 
-Canonical discoverability files:
+`optulus-anchor` is a Python SDK for validating AI tool functions.
 
-- `llms.txt` (concise quick context)
-- `llms-full.txt` (complete API reference)
+What it provides:
+
+- `validate_tool(...)` decorator for pre-call param validation and post-call response validation
+- trace event emission with statuses: `PASS`, `PARAM_FAIL`, `RESPONSE_FAIL`, `EXECUTION_FAIL`
+- `set_trace_sink(...)` callback integration for receiving each trace event
+- persistent SQLite trace logging under `.trace/traces.sqlite`
+- CLI reporting via `anchor report`
+
+Trace sink support:
+
+- Yes. `set_trace_sink(sink)` is part of the SDK.
+- Pass a callable to receive each trace event dict.
+- Pass `None` to clear the sink.
+
+Core exports from `optulus_anchor`:
+
+- `validate_tool`
+- `set_trace_sink`
+- `enable_persistent_tracelog`
+- `disable_persistent_tracelog`
+- `ToolValidationError`
+- `SchemaDriftError`
+- `ToolCorrectionNeeded`
+
+More docs:
+
+- `README.md` (human-friendly overview)
+- `llms.txt` (compact LLM context)
+- `llms-full.txt` (detailed API reference)

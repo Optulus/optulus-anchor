@@ -1,82 +1,71 @@
 # optulus-anchor
 
-A Python SDK that validates AI agent tool calls using schemas before and after execution.
-It catches malformed parameters before tool execution and detects response drift from upstream APIs.
+Runtime validation SDK for AI tool callables.
 
 ## Install
 
-pip install optulus-anchor
+`pip install optulus-anchor`
 
-## Core Usage
+## What it does
 
-Wrap any Python tool function with `@validate_tool`.
+- validates tool input params before execution (`params_schema`)
+- validates tool output after execution (`response_schema`)
+- supports sync + async wrapped functions
+- emits structured traces and optional sink callbacks
+- persists trace rows to SQLite by default
+
+## Main API
 
 ```python
-from pydantic import BaseModel
-from optulus_anchor import validate_tool
-
-
-class SearchParams(BaseModel):
-    query: str
-    limit: int = 10
-
-
-class SearchResponse(BaseModel):
-    results: list[str]
-    count: int
-
-
-@validate_tool(
-    params_schema=SearchParams,
-    response_schema=SearchResponse,
+validate_tool(
+    *,
+    params_schema: type[Any] | None = None,
+    response_schema: type[Any] | None = None,
+    on_param_error: Literal["raise", "log", "warn", "self_correct"] = "raise",
+    on_response_error: Literal["raise", "log", "warn"] = "log",
+    max_correction_attempts: int = 2,
 )
-def search_tool(query: str, limit: int = 10) -> dict[str, object]:
-    return {"results": [query], "count": 1}
 ```
 
-## Works With
+Parameter error policy:
 
-- Any Python callable used as an agent tool
-- Sync and async tool functions
-- Pydantic `BaseModel` schemas (including strict/forbid-extra configs)
-- Existing tool wrappers from frameworks (LangChain, OpenAI tool calling, Anthropic tool use, MCP, CrewAI) because validation wraps normal Python functions
+- `raise`: emit `PARAM_FAIL`, raise `ToolValidationError`
+- `log` / `warn`: emit `PARAM_FAIL`, continue
+- `self_correct`: emit `PARAM_FAIL`, raise `ToolCorrectionNeeded` with correction payload
 
-## Key Behaviors
+Response error policy:
 
-- `params_schema` validation runs **before** execution
-- `response_schema` validation runs **after** execution
-- `on_param_error="raise"` (default) stops invalid calls
-- `on_response_error="log"` (default) logs response drift without crashing by default
-- All events are emitted as structured JSON trace logs
+- `raise`: emit `RESPONSE_FAIL`, raise `SchemaDriftError`
+- `log` / `warn`: emit `RESPONSE_FAIL`, return original output
 
-## Common Patterns
+## Trace integrations
 
-### Detect API drift silently
+- `set_trace_sink(callable_or_none)` is supported (yes, trace sink is a real SDK feature)
+- default logger: `optulus_anchor.tool_validator`
+- statuses: `PASS`, `PARAM_FAIL`, `RESPONSE_FAIL`, `EXECUTION_FAIL`
+- persistent DB path: `.trace/traces.sqlite`
+- env controls:
+  - `OPTULUS_ANCHOR_TRACE_DIR` to relocate trace root
+  - `OPTULUS_ANCHOR_NO_TRACE=1|true|yes|on` to disable persistence
+- runtime controls:
+  - `disable_persistent_tracelog()`
+  - `enable_persistent_tracelog()`
 
-`@validate_tool(response_schema=StripeChargeResponse, on_response_error="log")`
+## CLI
 
-### Hard-fail on bad parameters
+- `anchor report --hours 24`
+- summarizes recent call/failure counts and schema-drift hints from trace data
 
-`@validate_tool(params_schema=PaymentParams, on_param_error="raise")`
+## Public exports
 
-### Full validation both sides
+- `validate_tool`
+- `set_trace_sink`
+- `enable_persistent_tracelog`
+- `disable_persistent_tracelog`
+- `ToolValidationError`
+- `SchemaDriftError`
+- `ToolCorrectionNeeded`
 
-`@validate_tool(params_schema=Params, response_schema=Response)`
+## Full reference
 
-## Trace Output Format
-
-```json
-{
-  "timestamp": "...",
-  "tool": "search_tool",
-  "status": "PASS | PARAM_FAIL | RESPONSE_FAIL | EXECUTION_FAIL",
-  "latency_ms": 24,
-  "params_valid": true,
-  "response_valid": true,
-  "errors": []
-}
-```
-
-## Full Reference
-
-For complete API details, read `llms-full.txt`.
+See `llms-full.txt`.
