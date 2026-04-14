@@ -38,6 +38,7 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+examples/
 
 # Pytest cache
 .pytest_cache/
