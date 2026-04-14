@@ -1,17 +1,34 @@
 ![Build](https://img.shields.io/badge/build-passing-brightgreen) ![PyPI](https://img.shields.io/pypi/v/optulus-anchor) ![Python](https://img.shields.io/pypi/pyversions/optulus-anchor) ![License](https://img.shields.io/github/license/Optulus/optulus-anchor) ![Downloads](https://img.shields.io/pypi/dm/optulus-anchor)
 # optulus-anchor
 
-Python runtime guardrails for AI tool functions:
+Python runtime guardrails for AI tool functions and LLM tool-calling systems.
 
-- validate tool inputs against a schema before execution
-- validate tool outputs against a schema after execution
-- emit structured trace events for observability and drift detection
+Drop-in runtime validation for OpenAI, LangChain, MCP, and custom AI tools.
+Validate inputs, validate outputs, and detect schema drift in production.
+
+Optulus Anchor is a Python decorator for validating AI tool calls, OpenAI function calls,
+LangChain tools, Anthropic tool use, MCP tools, and custom agent runtimes.
+
+LLM tool calls often break silently:
+
+- wrong parameter types
+- missing required fields
+- schema drift after model updates
+- invalid JSON outputs
+- no observability in production
+
+Optulus Anchor catches these failures at runtime with structured trace events.
 
 ## Install
 
 ```bash
 pip install optulus-anchor
 ```
+
+## Why
+
+Model upgrades, prompt changes, and orchestration bugs can break tool calls without obvious failures.
+Use Anchor in CI, staging, or production to monitor tool reliability over time.
 
 ## 30-Second Example
 
@@ -39,6 +56,47 @@ class SearchResponse(BaseModel):
 def search_docs(query: str, limit: int = 3) -> dict[str, object]:
     selected = [f"{query}-a", f"{query}-b", f"{query}-c"][:limit]
     return {"results": selected, "count": len(selected)}
+```
+
+## Before and After
+
+```python
+# Without Anchor
+search_docs(limit="five")  # often fails later in unclear ways
+
+# With Anchor
+# Emits PARAM_FAIL with normalized validation errors before execution
+search_docs(limit="five")
+```
+
+## Works With
+
+This SDK wraps regular Python callables, so it can sit under most tool ecosystems:
+LangChain, OpenAI tool calling, Anthropic tool use, MCP servers, CrewAI, or custom runtimes.
+
+## Use Cases
+
+- OpenAI function calling retries with structured validation errors
+- LangChain tool input/output validation
+- MCP server schema enforcement
+- production drift detection after model or prompt changes
+- agent tool observability with trace events and reporting
+
+## Common Failures It Catches
+
+- missing required argument
+- wrong enum value or type mismatch
+- malformed tool response payload
+- response schema drift in production
+
+## Trace Event Example
+
+```json
+{
+  "tool": "search_docs",
+  "status": "PARAM_FAIL",
+  "errors": [{"field": "limit", "msg": "Input should be int"}]
+}
 ```
 
 ## Public API
@@ -121,8 +179,6 @@ validate_tool(
 set_trace_sink(sink: Callable[[dict[str, Any]], None] | None) -> None
 ```
 
-Yes, trace sink callback delivery is supported.
-
 - pass a callable to receive every emitted trace event
 - pass `None` to clear callback delivery
 - callback is process-global
@@ -165,11 +221,6 @@ anchor report --hours 24
 - tool-level calls and failures in a lookback window
 - drift hints inferred from `RESPONSE_FAIL` errors (for example missing fields)
 - most unreliable tool by failure rate
-
-## Works With
-
-This SDK wraps regular Python callables, so it can sit under most tool ecosystems:
-LangChain, OpenAI tool calling, Anthropic tool use, MCP servers, CrewAI, or custom runtimes.
 
 ## LLM Discoverability Files
 
