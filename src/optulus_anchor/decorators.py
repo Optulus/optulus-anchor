@@ -88,7 +88,7 @@ def validate_tool(
             )
 
     def _handle_response_failure(
-        tool_name: str, errors: list[str], latency_ms: int
+        tool_name: str, errors: list[str], latency_ms: float
     ) -> None:
         log_trace(
             tool_name,
@@ -115,14 +115,14 @@ def validate_tool(
             if not result.valid:
                 _handle_param_failure(func.__name__, result.errors)
 
-        def _validate_outgoing(result: Any, latency_ms: int) -> None:
+        def _validate_outgoing(result: Any, latency_ms: float) -> None:
             if response_schema is None:
                 return
             validation_result = validate_response(result, response_schema)
             if not validation_result.valid:
                 _handle_response_failure(func.__name__, validation_result.errors, latency_ms)
 
-        def _log_pass(latency_ms: int) -> None:
+        def _log_pass(latency_ms: float) -> None:
             log_trace(
                 func.__name__,
                 "PASS",
@@ -142,7 +142,7 @@ def validate_tool(
                     log_trace(func.__name__, "EXECUTION_FAIL", errors=[str(exc)])
                     raise
 
-                latency_ms = round((time.perf_counter() - start) * 1000)
+                latency_ms = round((time.perf_counter() - start) * 1000, 3)
                 _validate_outgoing(result, latency_ms)
                 _log_pass(latency_ms)
                 return result
@@ -159,7 +159,7 @@ def validate_tool(
                 log_trace(func.__name__, "EXECUTION_FAIL", errors=[str(exc)])
                 raise
 
-            latency_ms = round((time.perf_counter() - start) * 1000)
+            latency_ms = round((time.perf_counter() - start) * 1000, 3)
             _validate_outgoing(result, latency_ms)
             _log_pass(latency_ms)
             return result

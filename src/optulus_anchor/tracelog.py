@@ -62,7 +62,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             timestamp TEXT NOT NULL,
             tool_name TEXT NOT NULL,
             status TEXT NOT NULL,
-            latency_ms INTEGER,
+            latency_ms REAL,
             params_valid INTEGER,
             response_valid INTEGER,
             errors_json TEXT NOT NULL

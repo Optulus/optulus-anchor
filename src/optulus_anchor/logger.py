@@ -51,7 +51,7 @@ def log_trace(
     status: str,
     *,
     errors: list[str] | None = None,
-    latency_ms: int | None = None,
+    latency_ms: float | None = None,
     params_valid: bool | None = None,
     response_valid: bool | None = None,
 ) -> None:
