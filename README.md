@@ -8,6 +8,21 @@
 pip install optulus-anchor
 ```
 
+## CLI
+
+`optulus-anchor` includes an `anchor` command with a `report` subcommand for trace health:
+
+```bash
+anchor report
+```
+
+By default, it reads from `.trace/traces.sqlite` in your current working directory.
+If you set `OPTULUS_ANCHOR_TRACE_DIR`, it reads from
+`$OPTULUS_ANCHOR_TRACE_DIR/.trace/traces.sqlite` instead.
+
+The report summarizes each tool's call volume/failures for the last 24 hours and
+highlights response-schema drift signals detected in trace validation errors.
+
 ## 30-Second Example
 
 ```python

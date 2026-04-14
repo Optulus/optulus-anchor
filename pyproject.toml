@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = ["pydantic>=2.0"]
 
+[project.scripts]
+anchor = "optulus_anchor.cli:main"
+
 [project.optional-dependencies]
 dev = ["hypothesis>=6.0", "pytest>=7.0"]
 
