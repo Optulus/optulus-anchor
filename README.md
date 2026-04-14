@@ -1,3 +1,4 @@
+![Build](https://img.shields.io/badge/build-passing-brightgreen) ![PyPI](https://img.shields.io/pypi/v/optulus-anchor) ![Python](https://img.shields.io/pypi/pyversions/optulus-anchor) ![License](https://img.shields.io/github/license/Optulus/optulus-anchor) ![Downloads](https://img.shields.io/pypi/dm/optulus-anchor)
 # optulus-anchor
 
 Python runtime guardrails for AI tool functions:
