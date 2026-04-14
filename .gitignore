@@ -42,6 +42,9 @@ coverage.xml
 # Pytest cache
 .pytest_cache/
 
+# optulus-anchor persistent tool trace (SQLite)
+.trace/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

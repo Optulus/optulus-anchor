@@ -6,6 +6,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from optulus_anchor.tracelog import persist_trace_entry
+
 logger = logging.getLogger("optulus_anchor.tool_validator")
 
 TraceSink = Callable[[dict[str, Any]], None]
@@ -56,8 +58,10 @@ def log_trace(
     """
     Emit a structured trace event for tool validation and execution lifecycle.
 
-    The event is logged via the package logger as JSON and optionally forwarded
-    to the sink configured with ``set_trace_sink``.
+    The event is logged via the package logger as JSON, persisted to a local
+    SQLite file under ``.trace/`` when persistent tracing is enabled (see
+    ``optulus_anchor.tracelog``), and optionally forwarded to the sink
+    configured with ``set_trace_sink``.
 
     Args:
         tool_name: Logical tool/function name associated with the event.
@@ -69,7 +73,8 @@ def log_trace(
         response_valid: Optional output validation result.
 
     Returns:
-        ``None``. Side effects are log emission and optional sink callback.
+        ``None``. Side effects are log emission, optional SQLite persistence, and
+        optional sink callback.
 
     Example:
         ```python
@@ -99,6 +104,8 @@ def log_trace(
         logger.info(message)
     else:
         logger.warning(message)
+
+    persist_trace_entry(entry)
 
     if _trace_sink is not None:
         _trace_sink(entry)
