@@ -2,6 +2,7 @@
 # optulus-anchor
 
 Python runtime guardrails for AI tool functions and LLM tool-calling systems.
+Your LLM tool calls fail silently, and you don't know until a user complains. 
 
 Drop-in runtime validation for OpenAI, LangChain, MCP, and custom AI tools.
 Validate inputs, validate outputs, and detect schema drift in production.
