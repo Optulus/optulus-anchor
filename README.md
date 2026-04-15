@@ -7,6 +7,8 @@ Your LLM tool calls fail silently, and you don't know until a user complains.
 Drop-in runtime validation for OpenAI, LangChain, MCP, and custom AI tools.
 Validate inputs, validate outputs, and detect schema drift in production.
 
+PyPI package: [https://pypi.org/project/optulus-anchor/](https://pypi.org/project/optulus-anchor/)
+
 Optulus Anchor is a Python decorator for validating AI tool calls, OpenAI function calls,
 LangChain tools, Anthropic tool use, MCP tools, and custom agent runtimes.
 
