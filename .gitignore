@@ -38,6 +38,9 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+
+# Example runs (keep example source tracked)
+examples/**/.trace/
 examples/
 
 # Pytest cache
