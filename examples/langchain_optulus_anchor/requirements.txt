@@ -1,0 +1,6 @@
+# Install SDK from repo root first:
+#   pip install -e .
+# Then install demo deps:
+#   pip install -r examples/langchain_optulus_anchor/requirements.txt
+
+langchain-core>=0.3.0

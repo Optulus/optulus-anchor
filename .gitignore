@@ -40,8 +40,6 @@ coverage.xml
 .hypothesis/
 
 # Example runs (keep example source tracked)
-examples/**/.trace/
-examples/
 
 # Pytest cache
 .pytest_cache/

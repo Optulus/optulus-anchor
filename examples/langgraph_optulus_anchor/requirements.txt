@@ -1,0 +1,9 @@
+# Install the SDK from the repo root first:
+#   pip install -e ".[langgraph]"
+# (pulls langgraph + langchain-core for optulus_anchor.integrations.langgraph_tool_node)
+# Then optional Groq live model:
+#   pip install -r examples/langgraph_optulus_anchor/requirements.txt
+
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-groq>=0.2.0

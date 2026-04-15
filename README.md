@@ -121,6 +121,8 @@ For LangGraph graphs, use `AnchorToolNode` in your tools node.
 
 ## Runnable Examples
 
+Examples are intended to be run from a repository checkout.
+
 From repo root:
 
 ```bash
@@ -145,6 +147,13 @@ pip install -e .
   ```bash
   pip install -r examples/langgraph_optulus_anchor/requirements.txt
   python -m examples.langgraph_optulus_anchor.main
+  ```
+
+- Legacy single-file examples:
+
+  ```bash
+  python examples/langgraph.py
+  python examples/langgraph_self_correction.py
   ```
 
 ## Common Failures It Catches
