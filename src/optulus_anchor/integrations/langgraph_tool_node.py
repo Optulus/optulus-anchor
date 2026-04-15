@@ -91,20 +91,22 @@ def _count_prior_corrections(messages: Sequence[BaseMessage], tool_name: str) ->
 
 
 def _make_correction_message(
-    exc: ToolCorrectionNeeded, tool_call_id: str
+    exc: ToolCorrectionNeeded, tool_call_id: str, *, tool_spec_name: str
 ) -> ToolMessage:
+    # Tag with ``tool_spec_name`` (``BaseTool.name`` / model tool_calls name), not
+    # ``exc.tool_name`` (wrapped Python function name) — counting keys must match.
     return ToolMessage(
         content=exc.correction_prompt,
         tool_call_id=tool_call_id,
         additional_kwargs={
             _CORRECTION_META_KEY: True,
-            _CORRECTION_TOOL_KEY: exc.tool_name,
+            _CORRECTION_TOOL_KEY: tool_spec_name,
         },
     )
 
 
 def _make_exhausted_message(
-    exc: ToolCorrectionNeeded, tool_call_id: str, prior: int
+    exc: ToolCorrectionNeeded, tool_call_id: str, prior: int, *, tool_spec_name: str
 ) -> ToolMessage:
     return ToolMessage(
         content=(
@@ -115,7 +117,7 @@ def _make_exhausted_message(
         ),
         tool_call_id=tool_call_id,
         additional_kwargs={
-            _CORRECTION_TOOL_KEY: exc.tool_name,
+            _CORRECTION_TOOL_KEY: tool_spec_name,
         },
     )
 
@@ -186,10 +188,14 @@ class AnchorToolNode:
             except ToolCorrectionNeeded as exc:
                 prior = _count_prior_corrections(messages, name)
                 if prior + 1 >= exc.max_attempts:
-                    tool_messages.append(_make_exhausted_message(exc, tid, prior))
+                    tool_messages.append(
+                        _make_exhausted_message(exc, tid, prior, tool_spec_name=name)
+                    )
                     logger.warning("Correction budget exhausted for %s", name)
                 else:
-                    tool_messages.append(_make_correction_message(exc, tid))
+                    tool_messages.append(
+                        _make_correction_message(exc, tid, tool_spec_name=name)
+                    )
 
             except ToolValidationError as exc:
                 tool_messages.append(_make_validation_error_message(exc, tid))
