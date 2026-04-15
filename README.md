@@ -25,6 +25,16 @@ Optulus Anchor catches these failures at runtime with structured trace events.
 pip install optulus-anchor
 ```
 
+Framework integrations are optional:
+
+```bash
+# For LangChain message-loop helper examples
+pip install langchain-core
+
+# For LangGraph ToolNode replacement
+pip install "optulus-anchor[langgraph]"
+```
+
 ## Why
 
 Model upgrades, prompt changes, and orchestration bugs can break tool calls without obvious failures.
@@ -108,6 +118,34 @@ while True:
 
 For LangGraph graphs, use `AnchorToolNode` in your tools node.
 
+## Runnable Examples
+
+From repo root:
+
+```bash
+pip install -e .
+```
+
+- LangChain mock demo (`AnchorToolExecutor`, no API key):
+
+  ```bash
+  pip install -r examples/langchain_optulus_anchor/requirements.txt
+  python -m examples.langchain_optulus_anchor.main
+  ```
+
+  Exhaust correction budget path:
+
+  ```bash
+  ANCHOR_LANGCHAIN_DEMO_EXHAUST_BUDGET=1 python -m examples.langchain_optulus_anchor.main
+  ```
+
+- LangGraph mock demo (`AnchorToolNode`, no API key):
+
+  ```bash
+  pip install -r examples/langgraph_optulus_anchor/requirements.txt
+  python -m examples.langgraph_optulus_anchor.main
+  ```
+
 ## Common Failures It Catches
 
 - missing required argument
@@ -136,6 +174,15 @@ from optulus_anchor import (
     enable_persistent_tracelog,
     set_trace_sink,
     validate_tool,
+)
+```
+
+Framework helpers:
+
+```python
+from optulus_anchor.integrations import (
+    AnchorToolExecutor,  # LangChain message-loop helper
+    AnchorToolNode,      # LangGraph tools node replacement
 )
 ```
 
