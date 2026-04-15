@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -44,11 +45,13 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from optulus_anchor import ToolCorrectionNeeded, ToolValidationError
+from optulus_anchor.integrations._correction_ctx import correction_context
 
 logger = logging.getLogger(__name__)
 
 _CORRECTION_META_KEY = "__anchor_correction"
 _CORRECTION_TOOL_KEY = "__anchor_tool"
+_CORRECTION_CYCLE_KEY = "__anchor_cycle_id"
 
 
 def _invoke_tool(tool: BaseTool, payload: dict[str, Any]) -> Any:
@@ -68,9 +71,10 @@ def _result_content(result: Any) -> str:
         return str(result)
 
 
-def _count_prior_corrections(messages: Sequence[BaseMessage], tool_name: str) -> int:
-    """
-    Count tagged correction ``ToolMessage``s for *tool_name* in *messages*.
+def _count_prior_corrections(
+    messages: Sequence[BaseMessage], tool_name: str
+) -> tuple[int, str | None]:
+    """Return ``(count, cycle_id)`` for the current correction run of *tool_name*.
 
     Only the current "correction run" matters: we stop counting once we hit a
     successful (non-correction) ``ToolMessage`` for the same tool, because that
@@ -78,6 +82,7 @@ def _count_prior_corrections(messages: Sequence[BaseMessage], tool_name: str) ->
     """
 
     count = 0
+    cycle_id: str | None = None
     for msg in reversed(messages):
         if not isinstance(msg, ToolMessage):
             continue
@@ -85,28 +90,38 @@ def _count_prior_corrections(messages: Sequence[BaseMessage], tool_name: str) ->
         if extra.get(_CORRECTION_TOOL_KEY) == tool_name:
             if extra.get(_CORRECTION_META_KEY):
                 count += 1
+                if cycle_id is None:
+                    cycle_id = extra.get(_CORRECTION_CYCLE_KEY)
             else:
                 break
-    return count
+    return count, cycle_id
 
 
 def _make_correction_message(
-    exc: ToolCorrectionNeeded, tool_call_id: str, *, tool_spec_name: str
+    exc: ToolCorrectionNeeded,
+    tool_call_id: str,
+    *,
+    tool_spec_name: str,
+    cycle_id: str,
 ) -> ToolMessage:
-    # Tag with ``tool_spec_name`` (``BaseTool.name`` / model tool_calls name), not
-    # ``exc.tool_name`` (wrapped Python function name) — counting keys must match.
     return ToolMessage(
         content=exc.correction_prompt,
         tool_call_id=tool_call_id,
         additional_kwargs={
             _CORRECTION_META_KEY: True,
             _CORRECTION_TOOL_KEY: tool_spec_name,
+            _CORRECTION_CYCLE_KEY: cycle_id,
         },
     )
 
 
 def _make_exhausted_message(
-    exc: ToolCorrectionNeeded, tool_call_id: str, prior: int, *, tool_spec_name: str
+    exc: ToolCorrectionNeeded,
+    tool_call_id: str,
+    prior: int,
+    *,
+    tool_spec_name: str,
+    cycle_id: str,
 ) -> ToolMessage:
     return ToolMessage(
         content=(
@@ -118,6 +133,7 @@ def _make_exhausted_message(
         tool_call_id=tool_call_id,
         additional_kwargs={
             _CORRECTION_TOOL_KEY: tool_spec_name,
+            _CORRECTION_CYCLE_KEY: cycle_id,
         },
     )
 
@@ -181,20 +197,28 @@ class AnchorToolNode:
                 )
                 continue
 
+            prior, existing_cycle_id = _count_prior_corrections(messages, name)
+            attempt = prior + 1
+            cycle_id = existing_cycle_id if prior > 0 else uuid.uuid4().hex
+
             try:
-                result = _invoke_tool(tool, args)
+                with correction_context(cycle_id, attempt):
+                    result = _invoke_tool(tool, args)
                 tool_messages.append(_make_success_message(result, tid, name))
 
             except ToolCorrectionNeeded as exc:
-                prior = _count_prior_corrections(messages, name)
-                if prior + 1 >= exc.max_attempts:
+                if attempt >= exc.max_attempts:
                     tool_messages.append(
-                        _make_exhausted_message(exc, tid, prior, tool_spec_name=name)
+                        _make_exhausted_message(
+                            exc, tid, prior, tool_spec_name=name, cycle_id=cycle_id
+                        )
                     )
                     logger.warning("Correction budget exhausted for %s", name)
                 else:
                     tool_messages.append(
-                        _make_correction_message(exc, tid, tool_spec_name=name)
+                        _make_correction_message(
+                            exc, tid, tool_spec_name=name, cycle_id=cycle_id
+                        )
                     )
 
             except ToolValidationError as exc:

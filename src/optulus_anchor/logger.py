@@ -46,6 +46,19 @@ def set_trace_sink(sink: TraceSink | None) -> None:
     _trace_sink = sink
 
 
+def _get_correction_context() -> tuple[str | None, int | None]:
+    """Read correction cycle context vars set by ``AnchorToolNode`` (if active)."""
+    try:
+        from optulus_anchor.integrations._correction_ctx import (
+            correction_attempt_var,
+            correction_cycle_id_var,
+        )
+
+        return correction_cycle_id_var.get(), correction_attempt_var.get()
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
 def log_trace(
     tool_name: str,
     status: str,
@@ -54,6 +67,8 @@ def log_trace(
     latency_ms: float | None = None,
     params_valid: bool | None = None,
     response_valid: bool | None = None,
+    correction_cycle_id: str | None = None,
+    correction_attempt: int | None = None,
 ) -> None:
     """
     Emit a structured trace event for tool validation and execution lifecycle.
@@ -71,6 +86,10 @@ def log_trace(
         latency_ms: Optional execution latency in milliseconds.
         params_valid: Optional input validation result.
         response_valid: Optional output validation result.
+        correction_cycle_id: Optional id grouping events in a single
+            correction cycle (set automatically by ``AnchorToolNode``).
+        correction_attempt: Optional 1-based attempt index within a
+            correction cycle.
 
     Returns:
         ``None``. Side effects are log emission, optional SQLite persistence, and
@@ -89,6 +108,13 @@ def log_trace(
         )
         ```
     """
+    if correction_cycle_id is None or correction_attempt is None:
+        ctx_cid, ctx_att = _get_correction_context()
+        if correction_cycle_id is None:
+            correction_cycle_id = ctx_cid
+        if correction_attempt is None:
+            correction_attempt = ctx_att
+
     entry = {
         "timestamp": datetime.now(UTC).isoformat(),
         "tool": tool_name,
@@ -97,6 +123,8 @@ def log_trace(
         "params_valid": params_valid,
         "response_valid": response_valid,
         "errors": errors or [],
+        "correction_cycle_id": correction_cycle_id,
+        "correction_attempt": correction_attempt,
     }
 
     message = json.dumps(entry)

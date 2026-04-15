@@ -1,10 +1,16 @@
+import sqlite3
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
 
 
-def test_anchor_tool_node_self_correct_then_success() -> None:
-    """Bad args -> correction ToolMessage -> fixed args -> success."""
+def test_anchor_tool_node_self_correct_then_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bad args -> correction ToolMessage -> fixed args -> success.
+
+    Also verifies that trace events in the DB share a consistent
+    ``correction_cycle_id`` across the correction cycle.
+    """
 
     pytest.importorskip("langgraph")
     pytest.importorskip("langchain_core")
@@ -19,8 +25,11 @@ def test_anchor_tool_node_self_correct_then_success() -> None:
     from pydantic import BaseModel, ConfigDict
     from typing_extensions import TypedDict
 
-    from optulus_anchor import validate_tool
+    from optulus_anchor import enable_persistent_tracelog, validate_tool
     from optulus_anchor.integrations.langgraph_tool_node import AnchorToolNode
+
+    monkeypatch.setenv("OPTULUS_ANCHOR_TRACE_DIR", str(tmp_path))
+    enable_persistent_tracelog()
 
     class StrictParams(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -78,6 +87,22 @@ def test_anchor_tool_node_self_correct_then_success() -> None:
     )
     tool_contents = [m.content for m in final["messages"] if m.type == "tool"]
     assert any('"y": 2' in c for c in tool_contents), f"Expected success payload, got {tool_contents}"
+
+    db = tmp_path / ".trace" / "traces.sqlite"
+    assert db.is_file()
+    con = sqlite3.connect(db)
+    rows = con.execute(
+        "SELECT status, correction_cycle_id, correction_attempt FROM trace_events ORDER BY id"
+    ).fetchall()
+    con.close()
+
+    assert len(rows) >= 2
+    fail_row = next(r for r in rows if r[0] == "PARAM_FAIL")
+    pass_row = next(r for r in rows if r[0] == "PASS")
+    assert fail_row[1] is not None, "PARAM_FAIL should have a correction_cycle_id"
+    assert fail_row[1] == pass_row[1], "PARAM_FAIL and PASS should share the same cycle_id"
+    assert fail_row[2] == 1
+    assert pass_row[2] == 2
 
 
 def test_anchor_tool_node_budget_exhausted() -> None:

@@ -28,7 +28,9 @@ def _init_db(trace_root: Path) -> Path:
                 latency_ms REAL,
                 params_valid INTEGER,
                 response_valid INTEGER,
-                errors_json TEXT NOT NULL
+                errors_json TEXT NOT NULL,
+                correction_cycle_id TEXT,
+                correction_attempt INTEGER
             );
             """
         )
@@ -42,14 +44,17 @@ def _insert_event(
     tool_name: str,
     status: str,
     errors: list[str] | None = None,
+    correction_cycle_id: str | None = None,
+    correction_attempt: int | None = None,
 ) -> None:
     with sqlite3.connect(db_path) as con:
         con.execute(
             """
             INSERT INTO trace_events (
                 timestamp, tool_name, status, latency_ms,
-                params_valid, response_valid, errors_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                params_valid, response_valid, errors_json,
+                correction_cycle_id, correction_attempt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 timestamp.isoformat(),
@@ -59,6 +64,8 @@ def _insert_event(
                 None,
                 None,
                 json.dumps(errors or []),
+                correction_cycle_id,
+                correction_attempt,
             ),
         )
 
@@ -146,6 +153,55 @@ def test_main_report_command_prints_report(capsys, tmp_path) -> None:
     stdout = capsys.readouterr().out
     assert "Tool Health Report — Last 24h" in stdout
     assert "search_docs" in stdout
+
+
+def test_render_report_includes_correction_cycles(tmp_path) -> None:
+    now = datetime(2026, 4, 14, 16, 0, tzinfo=UTC)
+    db_path = _init_db(tmp_path)
+
+    _insert_event(
+        db_path,
+        timestamp=now - timedelta(hours=2),
+        tool_name="reserve_table",
+        status="PARAM_FAIL",
+        errors=["bad time"],
+        correction_cycle_id="cyc-1",
+        correction_attempt=1,
+    )
+    _insert_event(
+        db_path,
+        timestamp=now - timedelta(hours=1, minutes=59),
+        tool_name="reserve_table",
+        status="PASS",
+        correction_cycle_id="cyc-1",
+        correction_attempt=2,
+    )
+    _insert_event(
+        db_path,
+        timestamp=now - timedelta(hours=1),
+        tool_name="reserve_table",
+        status="PARAM_FAIL",
+        errors=["bad party_size"],
+        correction_cycle_id="cyc-2",
+        correction_attempt=1,
+    )
+    _insert_event(
+        db_path,
+        timestamp=now - timedelta(minutes=59),
+        tool_name="reserve_table",
+        status="PARAM_FAIL",
+        errors=["still bad"],
+        correction_cycle_id="cyc-2",
+        correction_attempt=2,
+    )
+
+    output = render_report(now=now, hours=24)
+
+    assert "Correction Cycles" in output
+    assert "reserve_table" in output
+    assert "2 cycle(s)" in output
+    assert "1 resolved" in output
+    assert "1 exhausted" in output
 
 
 def test_main_rejects_non_positive_hours() -> None:

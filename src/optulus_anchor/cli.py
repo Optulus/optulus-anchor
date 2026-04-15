@@ -134,6 +134,57 @@ def _first_missing_field(errors: Iterable[object]) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class CycleStats:
+    tool_name: str
+    total_cycles: int
+    resolved: int
+    exhausted: int
+    avg_attempts: float
+
+
+def _fetch_correction_cycles(
+    conn: sqlite3.Connection, start_time: datetime
+) -> list[CycleStats]:
+    rows = conn.execute(
+        """
+        SELECT tool_name, correction_cycle_id,
+               COUNT(*) AS attempts,
+               MAX(CASE WHEN status = 'PASS' THEN 1 ELSE 0 END) AS resolved
+        FROM trace_events
+        WHERE correction_cycle_id IS NOT NULL
+          AND timestamp >= ?
+        GROUP BY tool_name, correction_cycle_id
+        HAVING COUNT(*) > 1
+            OR SUM(CASE WHEN status != 'PASS' THEN 1 ELSE 0 END) > 0
+        """,
+        (start_time.isoformat(),),
+    ).fetchall()
+
+    per_tool: dict[str, dict[str, int | float]] = {}
+    for tool_name, _cid, attempts, resolved in rows:
+        bucket = per_tool.setdefault(
+            tool_name, {"total": 0, "resolved": 0, "exhausted": 0, "sum_attempts": 0}
+        )
+        bucket["total"] += 1
+        bucket["sum_attempts"] += attempts
+        if resolved:
+            bucket["resolved"] += 1
+        else:
+            bucket["exhausted"] += 1
+
+    return [
+        CycleStats(
+            tool_name=name,
+            total_cycles=int(b["total"]),
+            resolved=int(b["resolved"]),
+            exhausted=int(b["exhausted"]),
+            avg_attempts=round(b["sum_attempts"] / b["total"], 1) if b["total"] else 0,
+        )
+        for name, b in sorted(per_tool.items())
+    ]
+
+
 def _format_since(ts: datetime, now: datetime) -> str:
     local_ts = ts.astimezone()
     local_now = now.astimezone()
@@ -166,6 +217,7 @@ def render_report(*, hours: int = 24, now: datetime | None = None) -> str:
         conn.row_factory = sqlite3.Row
         stats = _fetch_tool_stats(conn, start_time)
         drift_hints = _fetch_drift_hints(conn, start_time)
+        cycles = _fetch_correction_cycles(conn, start_time)
 
     if not stats:
         return "\n".join(
@@ -192,6 +244,17 @@ def render_report(*, hours: int = 24, now: datetime | None = None) -> str:
         if hint is not None:
             lines.append(
                 f"  └─ Missing field: {hint.field_name} ({_format_since(hint.since_timestamp, current_time)})"
+            )
+
+    if cycles:
+        lines.append("")
+        lines.append("Correction Cycles")
+        lines.append("─" * 41)
+        for cs in cycles:
+            lines.append(
+                f"{cs.tool_name}  {cs.total_cycles} cycle(s)"
+                f"   avg {cs.avg_attempts} attempts"
+                f"   {cs.resolved} resolved  {cs.exhausted} exhausted"
             )
 
     lines.append(rule)

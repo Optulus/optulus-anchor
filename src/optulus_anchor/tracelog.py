@@ -48,6 +48,9 @@ def _persistent_trace_active() -> bool:
     return not _explicitly_disabled and not _env_disables_persistent_trace()
 
 
+_CURRENT_SCHEMA_VERSION = "2"
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -55,7 +58,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
-        INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', '1');
 
         CREATE TABLE IF NOT EXISTS trace_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,11 +67,46 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             latency_ms REAL,
             params_valid INTEGER,
             response_valid INTEGER,
-            errors_json TEXT NOT NULL
+            errors_json TEXT NOT NULL,
+            correction_cycle_id TEXT,
+            correction_attempt INTEGER
         );
         """
     )
     conn.commit()
+
+    row = conn.execute(
+        "SELECT value FROM schema_meta WHERE key = 'version'"
+    ).fetchone()
+    current = row[0] if row else None
+
+    if current is None:
+        conn.execute(
+            "INSERT INTO schema_meta (key, value) VALUES ('version', ?)",
+            (_CURRENT_SCHEMA_VERSION,),
+        )
+    elif current < _CURRENT_SCHEMA_VERSION:
+        _migrate(conn, current)
+        conn.execute(
+            "UPDATE schema_meta SET value = ? WHERE key = 'version'",
+            (_CURRENT_SCHEMA_VERSION,),
+        )
+
+
+def _migrate(conn: sqlite3.Connection, from_version: str) -> None:
+    if from_version == "1":
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(trace_events)").fetchall()
+        }
+        if "correction_cycle_id" not in columns:
+            conn.execute(
+                "ALTER TABLE trace_events ADD COLUMN correction_cycle_id TEXT DEFAULT NULL"
+            )
+        if "correction_attempt" not in columns:
+            conn.execute(
+                "ALTER TABLE trace_events ADD COLUMN correction_attempt INTEGER DEFAULT NULL"
+            )
 
 
 def _bool_to_sql(value: bool | None) -> int | None:
@@ -123,8 +160,9 @@ def persist_trace_entry(entry: dict[str, Any]) -> None:
                 """
                 INSERT INTO trace_events (
                     timestamp, tool_name, status, latency_ms,
-                    params_valid, response_valid, errors_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    params_valid, response_valid, errors_json,
+                    correction_cycle_id, correction_attempt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry["timestamp"],
@@ -134,6 +172,8 @@ def persist_trace_entry(entry: dict[str, Any]) -> None:
                     _bool_to_sql(entry.get("params_valid")),
                     _bool_to_sql(entry.get("response_valid")),
                     json.dumps(entry.get("errors") or []),
+                    entry.get("correction_cycle_id"),
+                    entry.get("correction_attempt"),
                 ),
             )
     except Exception:
