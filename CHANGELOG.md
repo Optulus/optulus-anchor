@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-04-15
+
+### Breaking Changes
+
+- None.
+
+### Added
+
+- Added LangGraph integration via `optulus_anchor.integrations.AnchorToolNode`:
+  - catches `ToolCorrectionNeeded` and returns correction `ToolMessage` feedback
+  - enforces correction attempt budgets from message history
+  - routes strict `ToolValidationError` failures as `ToolMessage` guidance
+  - invokes `StructuredTool.func` directly so `validate_tool` receives raw LLM args
+- Added LangChain integration via `optulus_anchor.integrations.AnchorToolExecutor`:
+  - executes `AIMessage.tool_calls` against current message history
+  - converts correction and validation exceptions into model-visible `ToolMessage`s
+  - preserves correction cycle metadata for retries and observability
+- Added correction cycle observability in traces:
+  - `correction_cycle_id`
+  - `correction_attempt`
+- Added correction-aware reporting support in the CLI and trace aggregation paths.
+- Added runnable framework examples:
+  - `examples/langgraph_optulus_anchor`
+  - `examples/langchain_optulus_anchor`
+- Added test coverage for LangGraph and LangChain correction-aware tool execution behavior.
+
+### Changed
+
+- Updated `README.md` to match the current SDK surface, including:
+  - LangChain retry orchestration guidance with `AnchorToolExecutor`
+  - LangGraph usage with `AnchorToolNode`
+  - runnable example commands and optional dependency notes
+- Improved integration internals by extracting shared tool-runtime logic used by both
+  LangGraph and LangChain adapters.
+- Expanded trace/report behavior to include correction-cycle context in production diagnostics.
+
 ## [0.2.0]
 
 ### Breaking Changes
