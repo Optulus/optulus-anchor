@@ -82,6 +82,32 @@ LangChain, OpenAI tool calling, Anthropic tool use, MCP servers, CrewAI, or cust
 - production drift detection after model or prompt changes
 - agent tool observability with trace events and reporting
 
+## LangChain self-correction loop helper
+
+`@validate_tool(..., on_param_error="self_correct")` raises `ToolCorrectionNeeded`.
+The decorator does not orchestrate retries by itself. For LangChain message loops,
+use `AnchorToolExecutor` to convert correction exceptions into `ToolMessage`
+feedback, enforce correction budgets from message history, and preserve
+`correction_cycle_id` trace context.
+
+```python
+from langchain_core.messages import HumanMessage
+from optulus_anchor.integrations import AnchorToolExecutor
+
+messages = [HumanMessage("run")]
+executor = AnchorToolExecutor(tools)
+
+while True:
+    ai = llm.invoke(messages)
+    messages.append(ai)
+    tool_messages = executor.execute(messages=messages, ai_message=ai)
+    if not tool_messages:
+        break
+    messages.extend(tool_messages)
+```
+
+For LangGraph graphs, use `AnchorToolNode` in your tools node.
+
 ## Common Failures It Catches
 
 - missing required argument
